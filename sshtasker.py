@@ -54,12 +54,17 @@ except ImportError as e:
 
 class Connect():
 
-    def __init__(self, user, password, log=False, auto=False, key=False):
+    def __init__(self, user, password, log=False, auto=False, key=False, save=False):
         self.user = user
         self.password = password
         self.log = log
         self.auto = auto
         self.key = key
+        if save:
+            self.file_handle = open(save, 'w')
+
+        self.client = paramiko.SSHClient()
+
 
 
     def ssh(self, hostname, port, command=None):
@@ -67,40 +72,54 @@ class Connect():
         if not command:
             command = 'echo "Connected!"'
         try:
-            client = paramiko.SSHClient()
-            client.load_system_host_keys()
+            self.client.load_system_host_keys()
 
             if self.log:
                 paramiko.util.log_to_file('ssh.log')  # sets up logging
 
             if self.auto:
-                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                self.client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-            client.connect(hostname, port=port, username=self.user, password=self.password, look_for_keys=self.key)
-            stdin, stdout, stderr = client.exec_command(command)
+            self.client.connect(hostname, port=port, username=self.user, password=self.password, look_for_keys=self.key)
+            stdin, stdout, stderr = self.client.exec_command(command)
 
             errors = stderr.readlines()
             if errors:
-                print(Colors.YELLOW + "[!] Error" + Colors.ENDC)
+                self.exception("Error", Colors.YELLOW)
                 for error in errors:
-                    print(str(error))
+                    self.exception(str(error), Colors.YELLOW)
 
-            print("".join(stdout.readlines()))
+            self.output("".join(stdout.readlines()))
 
-            client.close()
+            self.client.close()
 
         except paramiko.AuthenticationException:
-            print("[!] Authentication failed, please verify your credentials.")
+            self.exception("Authentication failed, please verify your credentials.")
         except paramiko.SSHException as sshException:
-            print("[!] Unable to establish SSH connection: %s" % sshException)
+            self.exception("Unable to establish SSH connection: %s" % sshException)
         except paramiko.BadHostKeyException as badHostKeyException:
-            print("[!] Unable to verify server's host key: %s" % badHostKeyException)
-#        except Exception as e:
-#            print("[!] Operation error: %s" % e)
+            self.exception("Unable to verify server's host key: %s" % badHostKeyException)
         except KeyboardInterrupt:
-            print("[!] Connection terminated by user")
+            self.exception("Connection terminated by user")
+        except Exception as e:
+            self.exception("Operation error: %s" % e)
 
-        client.close()
+        if self.file_handle:
+            self.file_handle.close()
+        self.client.close()
+
+
+    def output(self, msg):
+        print(msg)
+        if self.file_handle:
+            self.file_handle.write(msg)
+
+
+    def exception(self, msg, color=Colors.RED):
+        msg = '[!] ' + msg
+        print(color + msg + Colors.ENDC)
+        if self.file_handle:
+            self.file_handle.write(msg)
 
 
 def main():
@@ -132,7 +151,8 @@ def main():
     parser.add_argument('list', metavar="server_list",
                         help="List of servers to connect to, separated by newline characters.")
     parser.add_argument('--version', action='version', version='%(prog)s 0.8')
-    parser.add_argument('--log', action='store_true', help="Eneble SSH logging")
+    parser.add_argument('--log', action='store_true', help="Enable SSH logging")
+    parser.add_argument('--save', metavar="FILE", help="Save output to file")
     args = parser.parse_args()
 
     if not args.key and not args.password:
@@ -140,7 +160,7 @@ def main():
     else:
         password = args.password
 
-    ssh_tasker = Connect(args.user, password, log=args.log, auto=args.auto, key=args.key)
+    ssh_tasker = Connect(args.user, password, log=args.log, auto=args.auto, key=args.key, save=args.save)
 
     if args.command and os.path.isfile(args.command):
         with open(args.command, 'r') as shell_script:
