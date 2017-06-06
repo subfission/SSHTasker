@@ -48,9 +48,59 @@ DEV_NULL = open("/dev/null", "w")
 try:
     import paramiko
 except ImportError as e:
-    print(Colors.RED + "[!] Unable to setup paramiko dependency.  Run: pip install paramiko" + Colors.ENDC)
+    sys.exit(Colors.RED + "[!] Unable to setup paramiko dependency.  Run: pip3 install paramiko" + Colors.ENDC)
 
-command = "lsb_release -d | sed -e 's/^\w*\:\t//'"
+
+
+class Connect():
+
+    def __init__(self, user, password, log=False, auto=False, key=False):
+        self.user = user
+        self.password = password
+        self.log = log
+        self.auto = auto
+        self.key = key
+
+
+    def ssh(self, hostname, port, command=None):
+
+        if not command:
+            command = 'echo "Connected!"'
+        try:
+            client = paramiko.SSHClient()
+            client.load_system_host_keys()
+
+            if self.log:
+                paramiko.util.log_to_file('ssh.log')  # sets up logging
+
+            if self.auto:
+                client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            client.connect(hostname, port=port, username=self.user, password=self.password, look_for_keys=self.key)
+            stdin, stdout, stderr = client.exec_command(command)
+
+            errors = stderr.readlines()
+            if errors:
+                print(Colors.YELLOW + "[!] Error" + Colors.ENDC)
+                for error in errors:
+                    print(str(error))
+
+            print("".join(stdout.readlines()))
+
+            client.close()
+
+        except paramiko.AuthenticationException:
+            print("[!] Authentication failed, please verify your credentials.")
+        except paramiko.SSHException as sshException:
+            print("[!] Unable to establish SSH connection: %s" % sshException)
+        except paramiko.BadHostKeyException as badHostKeyException:
+            print("[!] Unable to verify server's host key: %s" % badHostKeyException)
+#        except Exception as e:
+#            print("[!] Operation error: %s" % e)
+        except KeyboardInterrupt:
+            print("[!] Connection terminated by user")
+
+        client.close()
 
 
 def main():
@@ -73,7 +123,7 @@ def main():
     """.format(Colors.RED, Colors.BLUE, Colors.ENDC),
                                      formatter_class=argparse.RawTextHelpFormatter)
 
-    parser.add_argument('--command', '-c', help="Accepts a string with a command to be run on each host.")
+    parser.add_argument('--command', '-c', help="Accepts a file or string with a command to be run on each host.")
     parser.add_argument('--user', '-u', help="Username for all hosts.")
     parser.add_argument('--password', '-p', help="Password for all hosts.")
     parser.add_argument('--key', '-k', action='store_true', help="Use private key instead of password from ~/.ssh/.")
@@ -83,58 +133,38 @@ def main():
                         help="List of servers to connect to, separated by newline characters.")
     parser.add_argument('--version', action='version', version='%(prog)s 0.8')
     parser.add_argument('--log', action='store_true', help="Eneble SSH logging")
-    parser.add_argument('--port', default=22, type=int, help="Set a custom SSH port.")
     args = parser.parse_args()
 
-    password = args.password
+    if not args.key and not args.password:
+        password = getpass("Password:")
+    else:
+        password = args.password
 
+    ssh_tasker = Connect(args.user, password, log=args.log, auto=args.auto, key=args.key)
 
+    if args.command and os.path.isfile(args.command):
+        with open(args.command, 'r') as shell_script:
+            command=shell_script.read()
+    else:
+        command = args.command
 
-def parse_host_list(hostfile):
-    with open(hostfile) as f:
-        for hostname in f:
+    if os.path.isfile(args.list):
+        with open(args.list) as f:
+            for hostname in f:
+                task_hostname(ssh_tasker, hostname, command)
+    else:
+        hostname = args.list
+        task_hostname(ssh_tasker, hostname, command)
 
-
-
-def connect(hostname):
+def task_hostname(ssh_tasker, hostname, command):
+    host = hostname.split(':')
     try:
-        client = paramiko.SSHClient()
-        client.load_system_host_keys()
+        port = host[1]
+    except IndexError:
+        port = 22
 
-        if args.log:
-            paramiko.util.log_to_file('ssh.log')  # sets up logging
+    ssh_tasker.ssh(host[0], port, command)
 
-        if args.auto:
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-        if not args.key and not args.password:
-            password = getpass("Password:")
-
-        client.connect('internal.biodesign.asu.edu', port=args.port, username=args.user, password=password,
-                       look_for_keys=args.key)
-        stdin, stdout, stderr = client.exec_command(command)
-
-        errors = stderr.readlines()
-        if errors:
-            print(Colors.YELLOW + "[!] Error" + Colors.ENDC)
-            for error in errors:
-                print(str(error))
-
-        for line in stdout.readlines():
-            print(str(line).strip())
-
-        client.close()
-
-    except paramiko.AuthenticationException:
-        print("[!] Authentication failed, please verify your credentials.")
-    except paramiko.SSHException as sshException:
-        print("[!] Unable to establish SSH connection: %s" % sshException)
-    except paramiko.BadHostKeyException as badHostKeyException:
-        print("[!] Unable to verify server's host key: %s" % badHostKeyException)
-    except Exception as e:
-        print("[!] Operation error: %s" % e)
-
-    client.close()
 
 if __name__ == '__main__':
     main()
