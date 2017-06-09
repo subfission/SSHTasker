@@ -30,7 +30,7 @@ LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF
 import sys, os
 import argparse
 from getpass import getpass
-from socket import gaierror
+import socket
 
 class Colors():
     HEADER = '\033[95m'
@@ -86,19 +86,19 @@ class Connect():
 
             errors = stderr.readlines()
             if errors:
-                self.exception("Error", Colors.YELLOW)
+                exception("Error", Colors.YELLOW)
                 for error in errors:
-                    self.exception(str(error), Colors.YELLOW)
+                    exception(str(error), Colors.YELLOW)
 
             output("".join(stdout.readlines()))
 
         except paramiko.AuthenticationException:
             exception("Authentication failed, please verify your credentials. %s@%s:%s" % (self.user, hostname, port))
-        except paramiko.SSHException as e:
+        except (paramiko.SSHException,socket.timeout, paramiko.ssh_exception.NoValidConnectionsError) as e:
             exception("Unable to establish SSH connection: %s:%s %s" % (hostname, port, e))
         except paramiko.BadHostKeyException as e:
             exception("Unable to verify server's host key: %s:%s %s" % (hostname, port, e))
-        except gaierror as e:
+        except socket.gaierror as e:
             exception("Host not found: %s:%s %s" % (hostname, port, e))
         except Exception as e:
             exception("Operation error: %s:%s %s" % (hostname, port, e))
